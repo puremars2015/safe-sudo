@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
+telegram-state.json
+telegram-state.pending
+telegram-request.lock
+*.log
+.pytest_cache/

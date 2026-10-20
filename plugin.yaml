@@ -1,0 +1,7 @@
+name: safe-sudo
+version: "2.2.0"
+description: Telegram Mini App 遮罩 sudo 表單；任意單次 root 指令、identity 或固定部署，密碼不經聊天或模型。
+author: local
+provides_tools:
+  - safe_sudo
+  - sudo_command
