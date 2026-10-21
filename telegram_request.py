@@ -21,6 +21,58 @@ from urllib.request import Request, urlopen
 TARGET_USER = int(os.environ.get('SAFE_SUDO_TELEGRAM_USER_ID', '0'))
 IMAGE = 'docker.io/cloudflare/cloudflared:2026.9.3'
 PLUGIN_DIR = Path(__file__).resolve().parent
+RUNTIME_BINARIES = {
+    'docker': '/usr/bin/docker',
+    'podman': '/usr/bin/podman',
+}
+
+
+def runtime_config_path():
+    home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.hermes')))
+    return home / 'safe-sudo.json'
+
+
+def selected_runtime():
+    """Return the explicitly selected OCI runtime; legacy installs default to podman."""
+    path = runtime_config_path()
+    if not path.exists():
+        return 'podman'
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        runtime = data.get('container_runtime') if isinstance(data, dict) else None
+    except Exception:
+        raise RuntimeError('container_runtime_invalid') from None
+    if runtime not in RUNTIME_BINARIES:
+        raise RuntimeError('container_runtime_invalid')
+    return runtime
+
+
+def runtime_binary(runtime):
+    try:
+        return RUNTIME_BINARIES[runtime]
+    except KeyError:
+        raise ValueError('invalid runtime') from None
+
+
+def tunnel_run_argv(runtime, container, port):
+    return [
+        runtime_binary(runtime), 'run', '--rm', '--name', container, '--network', 'host',
+        '--read-only', '--cap-drop=all', '--security-opt=no-new-privileges', IMAGE,
+        'tunnel', '--no-autoupdate', '--protocol', 'http2', '--url',
+        f'http://127.0.0.1:{port}',
+    ]
+
+
+def container_remove_argv(runtime, container):
+    return [runtime_binary(runtime), 'rm', '-f', container]
+
+
+def container_exists_argv(runtime, container):
+    if runtime == 'docker':
+        return [runtime_binary(runtime), 'container', 'inspect', container]
+    if runtime == 'podman':
+        return [runtime_binary(runtime), 'container', 'exists', container]
+    raise ValueError('invalid runtime')
 
 
 def build_button(origin, nonce):
@@ -226,6 +278,11 @@ def launch_request(action='identity', request=None):
     state = {'request_id': secrets.token_hex(8), 'chat_id': TARGET_USER, 'status': 'starting', 'pid': os.getpid()}
     token = None
     message_id = None
+    stage = 'runtime'
+    try:
+        runtime = selected_runtime()
+    except RuntimeError:
+        return {'ok': False, 'status': 'container_runtime_invalid'}
     stage = 'credentials'
     session = None
     result = {'ok': False, 'status': 'request_failed', 'stage': stage}
@@ -259,12 +316,8 @@ def launch_request(action='identity', request=None):
             'HOME', 'PATH', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS', 'TMPDIR',
             'LANG', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME',
         )}
-        tunnel = subprocess.Popen([
-            '/usr/bin/podman', 'run', '--rm', '--name', container, '--network', 'host',
-            '--read-only', '--cap-drop=all', '--security-opt=no-new-privileges', IMAGE,
-            'tunnel', '--no-autoupdate', '--protocol', 'http2', '--url',
-            f'http://127.0.0.1:{server.server_port}',
-        ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        tunnel = subprocess.Popen(
+            tunnel_run_argv(runtime, container, server.server_port), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE, text=True, env=env, cwd=str(Path.home()))
         address = []
         found = threading.Event()
@@ -399,10 +452,10 @@ def launch_request(action='identity', request=None):
                 attempt('tunnel_kill_failed', tunnel.kill)
                 attempt('tunnel_reap_failed', lambda: tunnel.wait(timeout=2))
             attempt('container_remove_failed', lambda: subprocess.run(
-                ['/usr/bin/podman', 'rm', '-f', container],
+                container_remove_argv(runtime, container),
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5))
             check = attempt('container_verify_failed', lambda: subprocess.run(
-                ['/usr/bin/podman', 'container', 'exists', container],
+                container_exists_argv(runtime, container),
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3))
             if check is not None and check.returncode != 1:
                 errors.append('container_removal_unverified')

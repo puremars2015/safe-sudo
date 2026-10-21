@@ -4,13 +4,17 @@ Hermes Agent 插件：在 Telegram Mini App 的 HTTPS 遮罩表單輸入 sudo �
 
 ## 安裝
 
-適用 Linux、Python 3.10+，需有 Hermes Agent、sudo、rootless Podman，以及可連線的 Telegram Bot。先設定 Hermes 的 Telegram 私訊整合；sudo 帳號必須原本就有執行目標指令的權限。插件不修改 sudoers。
+適用 Linux、Python 3.10+，需有 Hermes Agent、sudo，以及 Docker **或** rootless Podman，並需可連線的 Telegram Bot。先設定 Hermes 的 Telegram 私訊整合；sudo 帳號必須原本就有執行目標指令的權限。插件不修改 sudoers。
 
 ```bash
-git clone https://github.com/puremars2015/safe-sudo.git ~/.hermes/plugins/safe-sudo
+hermes plugins install https://github.com/puremars2015/safe-sudo.git --no-deps --no-enable
+# 互動選擇 Docker 或 Podman；也可指定 --runtime docker / --runtime podman
+python3 ~/.hermes/plugins/safe-sudo/setup_runtime.py
 hermes plugins enable safe-sudo
 hermes plugins doctor ~/.hermes/plugins/safe-sudo --ci
 ```
+
+runtime 選擇會寫入 `${HERMES_HOME:-~/.hermes}/safe-sudo.json`，設定只接受 `docker` 或 `podman`；執行檔固定對應 `/usr/bin/docker` 或 `/usr/bin/podman`，不接受任意路徑。未建立此設定的舊版安裝為了相容性預設使用 Podman。
 
 Gateway 的執行環境必須設定：
 
